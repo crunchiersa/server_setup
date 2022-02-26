@@ -1,0 +1,143 @@
+#!/bin/bash
+##AUTHOR: crunchie
+##DATE: 31.12.2018
+##update_and_move.sh - Check for updates and automatically install any available updates.
+##Version: 3.0
+##CHANGES 3.0: Change execution logic to functions.
+
+###############
+## Functions ##
+###############
+
+check_root () {
+    if [ "$EUID" -ne 0 ]
+    then echo "This script must be run as root!"
+    exit
+    fi
+}
+
+check_update_dir_root () {
+    if [ ! -d /root/UpdateLog/"$day"_Logs/ ]; then
+        mkdir -p /root/UpdateLog/"$day"_Logs
+    fi
+}
+
+check_update_dir_user () {
+    if [ ! -d $userhome/UpdateLog/"$day"_Logs/ ]; then
+        mkdir -p $userhome/UpdateLog/"$day"_Logs
+    fi
+
+}
+
+check_pm () {
+    which apt-get
+    apt=$?
+    which yum
+    yum=$?
+    which pacman
+    pacman=$?
+}
+
+update () {
+    case "$1" in
+        apt)
+            apt-get update > $roothome/UpdateLog/"$day"_Logs/output_update
+            return 0
+            ;;
+        yum)
+            yum check-update > $roothome/UpdateLog/"$day"_Logs/output_update
+            return 0
+            ;;
+        pacman)
+            pacman -Syy > $roothome/UpdateLog/"$day"_Logs/output_update
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+upgrade () {
+    case "$1" in
+        apt)
+            apt-get dist-upgrade -y >> $roothome/UpdateLog/"$day"_Logs/output_update
+            return 0
+            ;;
+        yum)
+            yum update -y >> $roothome/UpdateLog/"$day"_Logs/output_update
+            return 0
+            ;;
+        pacman)
+            pacman -Syu --noconfirm --needed > $roothome/UpdateLog/"$day"_Logs/output_update
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+rename_file () {
+    cd $roothome/UpdateLog/"$day"_Logs
+    for file in output_update; do
+        mv $file $cdate"_"$file
+    done
+}
+
+sync_update_dirs () {
+    rsync -r $roothome/UpdateLog/"$day"_Logs/ $userhome/UpdateLog/"$day"_Logs/
+}
+
+change_owner () {
+    local user=$user
+    chown -R "$user":"$user" $userhome/UpdateLog/
+}
+
+###############
+## Variables ##
+###############
+
+cdate=$(date +%Y-%m-%d_%H-%M)
+day=$(date +%Y-%m-%d)
+user=crunchie 					## ADD USERNAME HERE
+roothome=$(eval echo "~root")
+userhome=$(eval echo "~$user")
+apt=""
+yum=""
+pacman=""
+
+###############
+## Execution ##
+###############
+
+check_root
+check_pm
+
+## If one of the supported package managers is installed, check if all folders exist.
+if [ $apt -eq 0 -o $yum -eq 0 -o $pacman -eq 0 ]; then
+    check_update_dir_root
+    check_update_dir_user
+fi
+
+## Execute update and upgrade
+if [ $apt -eq 0 -a $yum -eq 1 -a $pacman -eq 1 ]; then
+    update apt
+    upgrade apt
+elif [ $apt -eq 1 -a $yum -eq 0 -a $pacman -eq 1 ]; then
+    update yum
+    upgrade yum
+elif [ $apt -eq 1 -a $yum -eq 1 -a $pacman -eq 0 ]; then
+    update pacman
+    upgrade pacman
+else
+    printf "No supported package manager is installed."
+    exit 1
+fi
+
+## Sync files between folders and change owner
+if [ $apt -eq 0 -o $yum -eq 0 -o $pacman -eq 0 ]; then
+    rename_file
+    sync_update_dirs
+    change_owner
+fi
+
+exit 0

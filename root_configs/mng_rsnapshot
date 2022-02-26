@@ -1,0 +1,69 @@
+#!/bin/bash
+##AUTHOR: crunchie
+##DATE: 08.12.2019
+##chown_backup - Change owner of directory listings according to defined cases. The user and group to whom ownership is transferred 
+## are defined in the beginning of script. Location of folders to be chown alos defined.
+## Parameter for case are expected when script is called.
+##Version: 1.0
+
+# Declare Functions
+
+check_root () {
+# Check if executing User is root, if not --> exit with error!
+if [ "$(id -u)" != "0" ]; then
+   echo "This script must be run as root" 1>&2
+   exit 1
+fi
+}
+
+check_param_exist () {
+	if [ $1 == 0 ]; then
+		echo ""
+		echo "No parameters passed." "$STR"
+		echo ""
+		exit 1
+	elif [ $1 -gt 1 ]; then
+		echo ""
+		echo "Too many parameters passed." "$STR"
+		echo ""
+	fi
+}
+
+check_param_1 () {
+if [ -z $1 ]; then
+	echo ""
+	echo "No parameter was passed"
+	echo "Parameter can be: hourly, daily, weekly or monthly."
+	echo ""
+	exit 1
+else
+arrayparam1=(hourly daily weekly monthly)
+	for (( i=0; i<${#arrayparam1[@]}; i++ ))
+	do
+        if [ $1 == "${arrayparam1[$i]}" ]; then
+                par1="ok"
+        fi
+	done
+	if [ "$par1" != "ok" ]; then
+		echo ""
+		echo "Invalid parameter." "$STR"
+		echo ""
+		exit 1
+	fi
+fi
+}	
+
+# Declarations of variables
+user=crunchie    			## Declare user
+group=sambashare 			## Declare group
+location=/backup/rsnapshot/	## Declare location
+fol=".*"
+STR=$'Please use script with one parameter. \n Parameter can be: hourly, daily, weekly or monthly.'
+
+check_root
+check_param_exist $#
+check_param_1 $1
+rsnapshot $1
+chown -R $user:$group $location$1$fol
+logger "Changed owner of $1-Snapshot."
+

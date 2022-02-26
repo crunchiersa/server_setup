@@ -1,0 +1,407 @@
+#!/bin/bash
+##AUTHOR: crunchie
+##DATE: 05.11.2020
+##setup_server - Script to setup basic server functionality. Script depends on files in the subfolders. 
+## Parameter must be passed to define which services should be enabled.
+## Parameters: first = type of installation (complete, sethost, setscripts,setuser, setssh or setiptable), second = servtype (normal, backup), third = hostname that should be set.
+## Version: 2.1
+## CHANGES V1.1: Minor adjustments in Coding. Additional function to check if user and group exist, and 
+## create them if they don't exist. .bashrc and .bash_aliases are now added in user-home and root- 
+## home. user has green name and location in bash, root has red.
+## CHANGES V1.2: Additional function to install software and do a update when finishing up.
+## CHANGES V1.3: Change to function set_ssh_con. 
+## CHANGES V1.4: Additional functions to check for orig-folders. Changes to other function to eliminate unnecessary coding. Changes to install_sw-function.
+## CHANGES V1.5: Functions cleaned up, executing phase split into two sections --> general and server-specific.
+## CHANGES V1.6: Functions cleaned up, executing phase cleaned up.
+## CHANGES V1.7: Added Parameters in header. Changed execution phase and added a reboot at end of installation phase. Added function to setup iptables with basic rules in place.
+## CHANGES V1.8: Added missing parenthesis, changed function to install sudo at an earlier stage, as necessary to determine home directory of new user. Sets an initial password 
+##		 if new user is created and forces the user to change password at next login.
+## CHANGES V2.0: Additional Parameter to only execute selected functions (like setting hostname, installing config files etc).
+## CHANGES V2.1: Added function to setup networking with a fixed IP and correct DNS. (Work in Progress!)
+## CHANGES V2.2: Added feature to import certain variables from a variable file in then origpath-location. Changed certain jobs to ansible.
+## CHANGES V2.3: Removed Parameter-checks, parameters are now sourced from variables file. Changed locations to a default location to run with ansible.
+
+##################################
+## SYSTEM WIDE CONFIG FUNCTIONS ##
+##################################
+check_root () {
+if [ "$(id -u)" != "0" ]; then
+	echo "This script must be run as root" 1>&2
+	exit 1
+fi
+}
+
+check_param_exist () {
+	if [ $# == 0 ]; then
+		echo ""
+		echo "No parameters passed." "$STR"
+		echo ""
+		exit 1
+	fi
+}
+
+check_param_1 () {
+if [ -z $1 ]; then
+	echo ""
+	echo "No first parameter was passed" "$STR"
+	echo ""
+	exit 1
+else
+arrayparam1=(complete sethost setscripts setuser setssh)
+	for (( i=0; i<${#arrayparam1[@]}; i++ ))
+	do
+        if [ $1 == "${arrayparam1[$i]}" ]; then
+                par1="ok"
+        fi
+	done
+	if [ "$par1" != "ok" ]; then
+		echo ""
+		echo "Invalid first parameter." "$STR"
+		echo ""
+		exit 1
+	fi
+fi
+}	
+
+check_param_2 () {
+if [ -z $1 ]; then
+	echo ""
+	echo "No first parameter was passed" "$STR"
+	echo ""
+	exit 1
+else
+arrayparam2=(backup normal)
+	for (( i=0; i<${#arrayparam2[@]}; i++ ))
+	do
+        if [ $1 == "${arrayparam2[$i]}" ]; then
+                par2="ok"
+        fi
+	done
+	if [ "$par2" != "ok" ]; then
+		echo ""
+		echo "Invalid second parameter." "$STR"
+		echo ""
+		exit 1
+	fi
+fi
+}
+	
+check_param_3 () {
+if [ ! -z $1 ]; then
+		par3="ok"
+fi
+if [ "$par3" != "ok" ]; then
+	echo ""
+	echo "Invalid third parameter." "$STR"
+	echo ""
+	exit 1
+fi
+}	
+
+set_ssh () {
+    cp /etc/ssh/sshd_config $origetc/sshd_config.backup
+    cp /root/initial_setup/general_configs/sshd_config /etc/ssh/sshd_config 
+}
+
+set_rsnap () {
+    mv /etc/rsnapshot.conf $origetc/rsnapshot.conf.backup
+	cp /root/initial_setup/general_configs/rsnapshot.conf /etc/rsnapshot.conf
+	if [ -d /backup/rsnapshot ]; then
+		:
+	else
+		mkdir -p /backup/rsnapshot
+	fi
+}
+
+set_user_group () {
+    if grep -q $user /etc/passwd; then
+	    if grep -q $group /etc/group; then
+       	    usermod -aG $group,sudo $user
+	    else
+       	    groupadd $group
+       	    usermod -aG $group,sudo $user
+	    fi
+    else 
+	    useradd -m -s /bin/bash $user
+	    echo $user:$passw | chpasswd
+	    passwd --expire $user
+	    if grep -q $group /etc/group; then
+		    usermod -aG $group,sudo  $user
+	    else
+		    groupadd $group
+		    usermod -aG $group,sudo $user
+	    fi
+	fi
+}
+
+install_sw () {
+	/root/initial_setup/root_configs/set_apt-sources
+    if [ $1 == "normal" ]; then
+	    apt-get update
+	    apt-get install dnsutils rsync screen open-vm-tools curl sudo gpg2 iptables-persistent -y
+	elif [ $1 == "normal" -a $virtual == 0 ]; then
+		apt-get update
+	    apt-get install dnsutils rsync screen curl sudo gpg2 iptables-persistent -y
+    elif [ $1 == "backup" ]; then
+	    apt-get install rsnapshot -y
+    fi
+}
+
+create_orig_files () {
+    if [ -d $origetc ]; then
+	    :	
+    else
+	    mkdir $origetc
+    fi
+}
+
+create_orig_home () {
+    if [ -d $1/orig ]; then
+        :
+    else
+        mkdir $1/orig
+    fi
+}
+
+set_hostname () {
+	hostname $1
+	mv /etc/hostname $origetc/hostname.backup
+	cp /etc/hosts $origetc/hosts.backup
+	echo $1 > /etc/hostname
+	sed -i s/$chost/$1/g /etc/hosts
+}
+
+set_env_root () {
+    homeroot=$HOME
+    create_orig_home $homeroot
+}
+
+set_env_user () {
+    homeuser=`sudo -u $user -s eval 'echo $HOME'`
+    create_orig_home $homeuser
+}
+
+set_iptables () {
+	cp /root/initial_setup/general_configs/iptables.firewall.rules /etc/iptables.firewall.rules
+	iptables-restore < /etc/iptables.firewall.rules
+	iptables-save > /etc/iptables/rules.v4
+}
+
+set_network () {
+	if [ -f /etc/network/interfaces -a -d $orig ]; then
+		mv /etc/network/interfaces $origetc/interfaces.backup
+	else
+		create_orig_files
+		mv /etc/network/interfaces $origetc/interfaces.backup		
+	fi
+	
+	touch /etc/network/interfaces
+	echo "########################################################################" >> /etc/network/interfaces
+    echo "## This file was created via script! Please do not edit file by hand! ##" >> /etc/network/interfaces
+	echo "########################################################################" >> /etc/network/interfaces
+	echo "" >> /etc/network/interfaces
+	echo "# This file describes the network interfaces available on your system" >> /etc/network/interfaces
+	echo "# and how to activate them. For more information, see interfaces(5)." >> /etc/network/interfaces
+	echo "" >> /etc/network/interfaces
+	echo "source /etc/network/interfaces.d/*" >> /etc/network/interfaces
+	echo "" >> /etc/network/interfaces
+	echo "# The loopback network interface" >> /etc/network/interfaces
+	echo "auto lo" >> /etc/network/interfaces
+	echo "iface lo inet loopback" >> /etc/network/interfaces
+	echo "" >> /etc/network/interfaces
+	echo "# The primary network interface" >> /etc/network/interfaces
+	echo "auto $nic" >> /etc/network/interfaces
+	echo "allow hotplug $nic" >> /etc/network/interfaces
+	echo "iface $nic inet static" >> /etc/network/interfaces
+	echo "	address $ip/24" >> /etc/network/interfaces
+	echo "	gateway $gateway" >> /etc/network/interfaces
+	echo "	dns-nameservers 10.10.50.2" >> /etc/network/interfaces
+	echo "	dns-search kranchie.lokal server.kranchie.lokal utility.kranchie.lokal" >> /etc/network/interfaces
+}
+
+set_resolv () {
+	if [ -f /etc/resolv.conf -a -d $orig ]; then
+		mv /etc/resolv.conf $orig/resolv.conf.backup
+	else
+		create_orig_files
+		mv /etc/resolv.conf $orig/resolv.conf.backup
+	fi
+	cp /root/initial_setup/general_configs/resolv.conf /etc/resolv.conf
+}
+
+delete_test_user () {
+	userdel -rf test
+}
+
+#################################
+## USER SPACE CONFIG FUNCTIONS ##
+#################################
+
+set_user_config () {
+    home=$1
+	if [ -f $home/.bashrc ]; then
+	    mv $home/.bashrc 	$home/orig
+    fi
+	if [ -f $home/.bash_aliases ]; then
+	    mv $home/.bash_aliases 	$home/orig
+    fi
+	
+    cp /root/initial_setup/user_configs/.bashrc	$home
+    cp /root/initial_setup/user_configs/.bash_aliases	$home
+}
+
+set_scripts_user () {
+    home=$1
+    if [ -d $home/bin ]; then
+	    chown -R $user:$user $home/bin
+    else
+	    mkdir -p $home/bin
+		chown -R $user:$user $home/bin
+	fi
+	
+    if [ $home == "/root" ]; then
+		chown -R root:root $home/bin
+        #cp /root/root_configs/update_and_move	$home/bin
+        cp /root/initial_setup/root_configs/mng_rsnapshot	 $home/bin
+		#cp /root/root_configs/set_apt-sources	 $home/bin
+		chmod -R u+x $home/bin
+    fi
+}
+
+set_ssh_con () {
+    home=$1
+    if [ -d $home/.ssh ];then
+	    cp /root/initial_setup/user_configs/authorized_keys $home/.ssh/authorized_keys
+    	cp /root/initial_setup/user_configs/$keyname    $home/.ssh/$keyname
+    	cp /root/initial_setup/user_configs/$pkeyname    $home/.ssh/$pkeyname
+	    cp /root/initial_setup/user_configs/config    $home/.ssh/config
+	    if [ -d $home/.ssh/tmp ];then
+		    :
+    	else 
+	    	mkdir $home/.ssh/tmp
+    	fi
+        if [ $home == "/root" ]; then
+            chown -R root:root $home/.ssh
+        else
+    	    chown -R $user:$user $home/.ssh
+        fi
+    else
+	    mkdir -p $home/.ssh
+    	cp /root/initial_setup/user_configs/authorized_keys $home/.ssh/authorized_keys
+        cp /root/initial_setup/user_configs/$keyname    $home/.ssh/$keyname
+        cp /root/initial_setup/user_configs/$pkeyname    $home/.ssh/$pkeyname
+        cp /root/initial_setup/user_configs/config    $home/.ssh/config
+        if [ -d $home/.ssh/tmp ];then
+			:   
+        else
+			mkdir $home/.ssh/tmp
+        fi
+        if [ "$home" == "/root" ]; then
+            chown -R root:root $home/.ssh
+        else
+            chown -R $user:$user $home/.ssh
+        fi
+    fi
+}
+
+set_user_cron ()  {
+    home=$2
+    if [ $home != "/root" ]; then
+        if [ -f /var/spool/cron/crontabs/$user ];then
+	        cp /root/initial_setup/user_configs/crontab /var/spool/cron/crontabs/$user
+        else 
+        	mkdir -p /var/spool/cron/crontabs/
+	        cp /root/initial_setup/user_configs/crontab /var/spool/cron/crontabs/$user
+        fi
+   elif [ $home == "/root" ]; then
+        if [ -f /var/spool/cron/crontabs/root ];then
+            if [ $1 == "backup" ]; then
+                cp /root/initial_setup/root_configs/crontab_backup /var/spool/cron/crontabs/root
+            elif [ $1 == "normal" ]; then
+                cp /root/initial_setup/root_configs/crontab_normal /var/spool/cron/crontabs/root
+            fi
+        else
+            mkdir -p /var/spool/cron/crontabs/
+            if [ $1 == "backup" ]; then
+                cp /root/initial_setup/root_configs/crontab_backup /var/spool/cron/crontabs/root
+            elif [ $1 == "normal" ]; then
+                cp /root/initial_setup/root_configs/crontab_normal /var/spool/cron/crontabs/root
+            fi
+        fi
+    fi
+}
+
+###################
+## EXECUTE PHASE ##
+###################
+
+# Check if executing User is root, if not --> exit with error!
+check_root
+#STR=$'Please use script with parameters. \n The following parameter combinations are possible: 
+#\n First parameter: "complete" + Second parameter "normal" or "backup" + Third parameter is hostname to be set. 
+#\n First parameter: "sethost" + Second parameter is hostname to be set. 
+#\n First parameter: "setscripts","setuser" or "setssh" + no other parameters needed.'
+#check_param_exist $#
+#check_param_1 $1
+
+# Set variables
+origpath=`pwd`
+source /root/initial_setup/variables			## SOURCES the file variables
+keyname="id_vmsamba"    						## SET SSH-KEYNAME
+pkeyname="$keyname.pub"
+origetc="/etc/orig"
+nic=`ip link | awk -F: '$0 !~ "lo|vir|wl|tun|wg|^[^0-9]"{print $2;getline}'`  ## GET Network interface used for internet. Filtering local, wireless, virtual devices, tunnel-adapters and wireguard-devices.
+
+chost=`hostname`								## Current/old hostname to replace in /etc/hosts
+set_env_root
+
+case $1 in
+	"complete")		set_user_group
+					set_env_user
+					create_orig_files
+					set_hostname $hostname
+					set_network
+					set_resolv
+					set_ssh
+					set_iptables
+					set_scripts_user $homeuser
+					set_scripts_user $homeroot
+					set_user_config $homeuser
+					set_user_config $homeroot
+					set_user_cron $servtype $homeroot
+					set_ssh_con $homeuser
+					set_ssh_con $homeroot
+					delete_test_user
+					;;	
+					
+	"sethost")		set_hostname $hostname
+					;;
+	
+	"setscripts")	set_user_group
+					set_env_user
+					set_scripts_user $homeuser
+					set_scripts_user $homeroot
+					;;
+					
+	"setuser")		set_user_group
+					set_env_user
+					set_user_config $homeuser
+					set_user_config $homeroot
+					set_scripts_user $homeuser
+					set_scripts_user $homeroot
+					;;			
+					
+	"setssh")		set_ssh
+					/etc/init.d/ssh restart
+					set_user_group
+					set_env_user
+					set_ssh_con $homeuser
+					set_ssh_con $homeroot
+					;;
+					
+	"setiptable")	set_iptables
+					;;
+esac
+rm -rf /root/initial_setup
+#shutdown -r 0
+exit 0

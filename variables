@@ -1,0 +1,11 @@
+##AUTHOR: crunchie
+##DATE: 31.10.2020
+## This file specifies the variables needed for the script setup_server
+user=				## SET User to be created
+passw=              ## SET Initial password
+group=				## SET group to be created
+ip=					## SET IP for local machine
+gateway=            ## SET gateway for local machine
+virtual=			## 1 = virtual machine; 0 = no virtual machine
+hostname=			## SET new hostname
+servtype=			## SET servertype to be installed

@@ -1,0 +1,31 @@
+#!/bin/bash
+##AUTHOR: crunchie
+##DATE: 01.11.2020
+##create_bin_dir - Create directory for scripts under /home/ansible.
+##Version: 1.0
+
+#######################
+## General Functions ##
+#######################
+
+create_bin () {
+	if [ -d $dahoam/bin ]; then
+		mkdir -p $dahoam/bin
+	elif [ ! -d $dahoam/bin ]; then
+		:
+	fi
+}
+
+###################
+## EXECUTE BLOCK ##
+###################
+
+if [ "$(id -u)" != "0" ]; then
+   echo "This script must be run as root" 1>&2
+   exit 1
+fi
+
+user=ansible ## SET User
+dahoam=`sudo -u $user -s eval 'echo $HOME'`
+
+create_bin
